@@ -1,0 +1,11 @@
+company_name,website,domain,country,industry,company_size,revenue,person_name,job_title,email,phone
+TechCorp,https://techcorp.com,techcorp.com,USA,Software,50-100,5000000,John Smith,Chief Executive Officer,john@techcorp.com,+1 (555) 123-4567
+DataInc,data-inc.com,data-inc.com,Canada,Information Technology,10-50,500000,Jane Doe,VP Engineering,jane.doe@data-inc.com,555-9876
+InnovateCo,https://innovate.co,,United Kingdom,Professional Services,100-500,10000000,Robert Johnson,Software Engineer,robert.johnson@innovate.co,+44 20 7946 0958
+GlobalTech,globaltech.io,globaltech.io,,Technology,500+,50000000,Maria Garcia,Head of Sales,,+1 (555) 987-6543
+NextGen,,nexgen.tech,Australia,Financial Services,20-50,2000000,David Lee,Product Manager,david@nexgen.tech,02 1234 5678
+TechCorp,https://techcorp.com,techcorp.com,USA,Software,50-100,5000000,John Smith,CEO,smith.j@techcorp.com,555-1234567
+CloudSys,cloud-sys.net,cloud-sys.net,Germany,Software,200-500,15000000,Anna Mueller,CTO,anna.mueller@cloud-sys.net,+49 30 1234 5678
+FutureBiz,futb.co,futb.co,India,Information Technology,50-100,3000000,Priya Patel,VP Sales,priya@futb.co,+91 22 1234 5678
+BizConnect,,bizconnect.com.au,Brazil,Professional Services,10-20,1000000,Carlos Silva,Data Scientist,carlos.silva@bizconnect.com.au,+55 11 9999 8888
+TechLeader,tech-leader.uk,tech-leader.uk,United States,Software,300+,75000000,Sarah Thompson,VP Marketing,,+1 (555) 555-0123

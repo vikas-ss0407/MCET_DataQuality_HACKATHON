@@ -1,0 +1,22 @@
+{
+  "chief executive officer": "Executive",
+  "ceo": "Executive",
+  "chief technology officer": "Engineering Leadership",
+  "cto": "Engineering Leadership",
+  "chief financial officer": "Finance",
+  "cfo": "Finance",
+  "chief marketing officer": "Marketing",
+  "cmo": "Marketing",
+  "vp engineering": "Engineering Leadership",
+  "vp sales": "Sales",
+  "sales director": "Sales",
+  "head of sales": "Sales",
+  "marketing director": "Marketing",
+  "product manager": "Product",
+  "product owner": "Product",
+  "software engineer": "Engineering",
+  "developer": "Engineering",
+  "data scientist": "Data",
+  "data engineer": "Data",
+  "head of data": "Data Leadership"
+}
