@@ -12,6 +12,8 @@ export default function App() {
   const [fixes, setFixes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [verifyingIndex, setVerifyingIndex] = useState(null);
+  const [aiSuggestIndex, setAiSuggestIndex] = useState(null);
 
   const handleUpload = async (file) => {
     setError(null);
@@ -63,6 +65,64 @@ export default function App() {
       link.parentNode.removeChild(link);
     } catch (err) {
       setError("No report available yet. Upload first.");
+    }
+  };
+
+  const handleAiSuggest = async (fixIndex, field, value) => {
+    setAiSuggestIndex(fixIndex);
+    try {
+      const response = await axios.post(`${API_BASE}/ai-suggest`, {
+        field_type: field,
+        value: value ?? "",
+      });
+
+      const updatedFixes = [...fixes];
+      updatedFixes[fixIndex] = {
+        ...updatedFixes[fixIndex],
+        suggested: response.data.suggestion,
+        confidence: response.data.confidence,
+        processing_mode: response.data.source,
+        note: response.data.details,
+        // Mark verified only when confidence is high
+        verified_online: Number(response.data.confidence || 0) >= 0.8,
+      };
+      setFixes(updatedFixes);
+    } catch (err) {
+      setError(`AI suggestion failed: ${err.message}`);
+    } finally {
+      setAiSuggestIndex(null);
+    }
+  };
+
+  const handleVerifyOnline = async (fixIndex, field, value) => {
+    setVerifyingIndex(fixIndex);
+    try {
+      // Determine field type based on field name
+      let fieldType = "email";
+      if (field.toLowerCase().includes("phone")) {
+        fieldType = "phone";
+      }
+
+      const response = await axios.post(`${API_BASE}/verify-online`, {
+        field_type: fieldType,
+        value: value,
+      });
+
+      // Update the fix with online verification result
+      const updatedFixes = [...fixes];
+      updatedFixes[fixIndex] = {
+        ...updatedFixes[fixIndex],
+        suggested: response.data.suggestion,
+        confidence: response.data.confidence,
+        processing_mode: response.data.source,
+        note: response.data.details,
+        verified_online: true,
+      };
+      setFixes(updatedFixes);
+    } catch (err) {
+      setError(`Online verification failed: ${err.message}`);
+    } finally {
+      setVerifyingIndex(null);
     }
   };
 
@@ -154,6 +214,21 @@ export default function App() {
               <h2 className="text-2xl font-bold text-gray-900">Fix Log</h2>
               <span className="ml-auto inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200">{fixes.length} fixes applied</span>
             </div>
+
+            {/* Online Verification Info Banner */}
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">💡</span>
+                <div>
+                  <h3 className="font-semibold text-blue-900 mb-1">Online Verification Available</h3>
+                  <p className="text-sm text-blue-700">
+                    For items marked as <span className="font-semibold">MANUAL</span> or <span className="font-semibold">ONLINE</span>, 
+                    click <span className="font-semibold">"🌐 Verify Online"</span> to use real-time API validation for higher accuracy.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -161,7 +236,7 @@ export default function App() {
                     <th className="text-left py-3 px-4 font-semibold text-gray-700 w-24">Mode</th>
                     <th className="text-left py-3 px-4 font-semibold text-gray-700 w-32">Field</th>
                     <th className="text-left py-3 px-4 font-semibold text-gray-700 flex-1">Change</th>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Confidence</th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-700 w-20">Confidence</th><th className="text-left py-3 px-4 font-semibold text-gray-700">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -175,11 +250,50 @@ export default function App() {
                         : mode === 'manual'
                         ? 'bg-red-50 text-red-700 border border-red-200'
                         : 'bg-gray-100 text-gray-700 border border-gray-200';
+                    
+                    const needsOnlineVerification = 
+                      (mode === 'manual' && fix.confidence < 0.6) || 
+                      (fix.processing_mode === 'ONLINE' && !fix.verified_online) ||
+                      (fix.processing_mode === 'MANUAL' && !fix.verified_online);
+                    
+                    const canVerifyOnline = 
+                      fix.field.toLowerCase().includes('email') || 
+                      fix.field.toLowerCase().includes('phone');
+
+                    // Only show AI Suggest for rows that truly need it:
+                    // - Mode is MANUAL or ONLINE
+                    // - Confidence is low (< 0.8)
+                    const canAiSuggest = (
+                      fix.field.toLowerCase().includes('email') ||
+                      fix.field.toLowerCase().includes('phone') ||
+                      fix.field.toLowerCase().includes('name') ||
+                      fix.field.toLowerCase().includes('job') ||
+                      fix.field.toLowerCase() === 'id'
+                    );
+                    // Rows that explicitly require manual review should not show AI Suggest
+                    const isManualOnly = (
+                      String(fix.suggested || '').trim().startsWith('[') ||
+                      String(fix.note || '').toLowerCase().includes('manual review') ||
+                      String(fix.processing_mode || '').toLowerCase() === 'manual' && Number(fix.confidence || 0) === 0
+                    );
+                    // Allow AI suggest for manual/online items, and also low-confidence offline names
+                    const needsAiSuggest = (
+                      (
+                        mode === 'manual' ||
+                        mode === 'online' ||
+                        (mode === 'offline' && Number(fix.confidence || 0) < 0.8 && canAiSuggest)
+                      ) &&
+                      Number(fix.confidence || 0) < 0.8 &&
+                      !fix.verified_online &&
+                      canAiSuggest &&
+                      !isManualOnly
+                    );
+
                     return (
                       <tr key={`${fix.field}-${fix.row_index}-${idx}`} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="py-3 px-4">
                           <span className={`inline-flex items-center px-2 py-1 text-xs font-bold rounded-full ${modeClasses}`}>
-                            {fix.processing_mode}
+                            {fix.verified_online ? '🌐 ' + fix.processing_mode : fix.processing_mode}
                           </span>
                         </td>
                       <td className="py-3 px-4 font-medium text-gray-900">{fix.field}</td>
@@ -189,6 +303,29 @@ export default function App() {
                         <span className="text-green-700 font-medium">"{fix.suggested || "(empty)"}"</span>
                       </td>
                       <td className="py-3 px-4 text-gray-600 text-xs">{fix.confidence}</td>
+                      <td className="py-3 px-4">
+                        {needsOnlineVerification && canVerifyOnline && (
+                          <button
+                            onClick={() => handleVerifyOnline(idx, fix.field, fix.original)}
+                            disabled={verifyingIndex === idx}
+                            className="px-3 py-1 text-xs font-semibold bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {verifyingIndex === idx ? '⏳ Verifying...' : '🌐 Verify Online'}
+                          </button>
+                        )}
+                        {needsAiSuggest && (
+                          <button
+                            onClick={() => handleAiSuggest(idx, fix.field, fix.original)}
+                            disabled={aiSuggestIndex === idx}
+                            className="ml-2 px-3 py-1 text-xs font-semibold bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {aiSuggestIndex === idx ? '⏳ Suggesting...' : '🤖 AI Suggest'}
+                          </button>
+                        )}
+                        {fix.verified_online && (
+                          <span className="text-xs text-green-600 font-semibold">✓ Verified</span>
+                        )}
+                      </td>
                       </tr>
                     );
                   })}

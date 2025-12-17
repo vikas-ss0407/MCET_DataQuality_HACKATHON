@@ -111,8 +111,9 @@ class DataQualityEngine:
                     is_valid, mapped_title, j_conf, j_note = self._validate_job_title(str(job_val))
                     if not is_valid:
                         invalid_count += 1
+                        suggestion = mapped_title or "(No match found - manual review needed)"
                         invalid_records.append({"row_index": idx, "field": job_field, "value": job_val, "issue": j_note})
-                        fixes.append(self._make_fix(idx, job_field, job_val, mapped_title or "", 0.0, "MANUAL", j_note))
+                        fixes.append(self._make_fix(idx, job_field, job_val, suggestion, 0.0, "MANUAL", j_note))
                         manual_review += 1
                     elif mapped_title and mapped_title != job_val:
                         standardized_count += 1
@@ -126,11 +127,20 @@ class DataQualityEngine:
                 if pd.notna(email_val):
                     cleaned_email, e_conf, e_mode, e_note = self._validate_email(str(email_val), row)
                     if e_conf == 0.0 and e_mode == "MANUAL":
-                        # Invalid email
+                        # Invalid email - generate suggestion and classify OFFLINE/ONLINE
                         invalid_count += 1
+                        suggestion = self._suggest_email_fix(str(email_val))
                         invalid_records.append({"row_index": idx, "field": email_field, "value": email_val, "issue": e_note})
-                        fixes.append(self._make_fix(idx, email_field, email_val, cleaned_email, e_conf, e_mode, e_note))
-                        manual_review += 1
+                        # Try validating the suggestion
+                        try:
+                            info = validate_email(suggestion, check_deliverability=False)
+                            fixed = info.normalized
+                            fixes.append(self._make_fix(idx, email_field, email_val, fixed, 0.85, "OFFLINE", f"Auto-fixed: {e_note}"))
+                            offline_fixes += 1
+                        except EmailNotValidError:
+                            fixes.append(self._make_fix(idx, email_field, email_val, suggestion, 0.0, "ONLINE", f"Needs verification: {e_note}"))
+                            online_fixes += 1
+                            manual_review += 1
                     elif cleaned_email and cleaned_email != email_val:
                         standardized_count += 1
                         fixes.append(self._make_fix(idx, email_field, email_val, cleaned_email, e_conf, e_mode, e_note))
@@ -173,9 +183,15 @@ class DataQualityEngine:
                     is_valid, cleaned_name, n_note = self._validate_name(str(name_val))
                     if not is_valid:
                         invalid_count += 1
+                        suggestion = self._suggest_name_fix(str(name_val))
                         invalid_records.append({"row_index": idx, "field": name_field, "value": name_val, "issue": n_note})
-                        fixes.append(self._make_fix(idx, name_field, name_val, cleaned_name, 0.0, "MANUAL", n_note))
-                        manual_review += 1
+                        # If suggestion is usable, mark OFFLINE; otherwise MANUAL
+                        if suggestion != name_val and not suggestion.startswith("["):
+                            fixes.append(self._make_fix(idx, name_field, name_val, suggestion, 0.70, "OFFLINE", f"Auto-fixed: {n_note}"))
+                            offline_fixes += 1
+                        else:
+                            fixes.append(self._make_fix(idx, name_field, name_val, suggestion, 0.0, "MANUAL", n_note))
+                            manual_review += 1
 
             # ID validation - must be positive integer
             if "id" in df.columns:
@@ -184,9 +200,14 @@ class DataQualityEngine:
                     is_valid, id_note = self._validate_id(str(id_val))
                     if not is_valid:
                         invalid_count += 1
+                        suggestion = self._suggest_id_fix(str(id_val))
                         invalid_records.append({"row_index": idx, "field": "id", "value": id_val, "issue": id_note})
-                        fixes.append(self._make_fix(idx, "id", id_val, "", 0.0, "MANUAL", id_note))
-                        manual_review += 1
+                        if suggestion != id_val and str(suggestion).isdigit():
+                            fixes.append(self._make_fix(idx, "id", id_val, suggestion, 0.80, "OFFLINE", f"Auto-fixed: {id_note}"))
+                            offline_fixes += 1
+                        else:
+                            fixes.append(self._make_fix(idx, "id", id_val, suggestion, 0.0, "MANUAL", id_note))
+                            manual_review += 1
 
             # Email score validation - must be 0-100
             score_fields = ["email_score", "people_email_score"]
@@ -513,6 +534,41 @@ class DataQualityEngine:
                 return False, None, 0.0, f"Unrecognized job title (closest: '{match}' - {score}% match)"
         
         return False, None, 0.0, "Unrecognized job title"
+    
+    def _suggest_email_fix(self, email: str) -> str:
+        email = str(email).strip()
+        if email.count("@") > 1:
+            parts = email.split("@")
+            email = parts[0] + "@" + "".join(parts[1:])
+        if "@" in email:
+            local, domain = email.split("@", 1)
+            domain = re.sub(r"[^a-zA-Z0-9.-]", "", domain)
+            local = re.sub(r"[^a-zA-Z0-9._+-]", "", local)
+            email = f"{local}@{domain}"
+        if "@" in email:
+            local, domain = email.split("@", 1)
+            if "." not in domain and domain:
+                email = f"{local}@{domain}.com"
+        return email
+    
+    def _suggest_name_fix(self, name: str) -> str:
+        # Check if name is purely numeric
+        if re.match(r"^\d+$", str(name).strip()):
+            return "[Name should contain characters, not numbers]"
+        cleaned = re.sub(r"\d", "", str(name))
+        cleaned = re.sub(r"[^a-zA-Z\s\-\']", "", cleaned)
+        cleaned = " ".join(cleaned.split())
+        return cleaned.strip() if cleaned.strip() else name
+    
+    def _suggest_id_fix(self, id_val: str) -> str:
+        try:
+            digits = re.sub(r"\D", "", str(id_val).strip())
+            if digits:
+                return digits
+            id_num = int(id_val)
+            return str(abs(id_num)) if id_num < 0 else str(id_num)
+        except:
+            return str(id_val)
     
     def _clean_phone(self, phone: str) -> str:
         """Clean and standardize phone number format."""
