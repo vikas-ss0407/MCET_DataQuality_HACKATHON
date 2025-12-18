@@ -31,17 +31,17 @@ class DataQualityEngine:
         # All detected columns will be stored in the dataframe
         # No hardcoded column list; everything is dynamic
 
-    def process_csv(self, file_bytes: bytes) -> Dict[str, Any]:
+    def process_csv(self, file_bytes: bytes, data_type: str = "people") -> Dict[str, Any]:
         """Process CSV file and return cleaned data, report, and fixes."""
         df = pd.read_csv(BytesIO(file_bytes))
-        return self._process_dataframe(df)
+        return self._process_dataframe(df, data_type=data_type)
 
-    def process_excel(self, file_bytes: bytes) -> Dict[str, Any]:
+    def process_excel(self, file_bytes: bytes, data_type: str = "people") -> Dict[str, Any]:
         """Process Excel file (.xlsx or .xls) and return cleaned data, report, and fixes."""
         df = pd.read_excel(BytesIO(file_bytes))
-        return self._process_dataframe(df)
+        return self._process_dataframe(df, data_type=data_type)
 
-    def _process_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def _process_dataframe(self, df: pd.DataFrame, data_type: str = "people") -> Dict[str, Any]:
         """Core processing logic: normalize, detect issues, fix, and report."""
         df = self._normalize_columns(df)
         df = df.replace({"": np.nan, " ": np.nan})
@@ -66,7 +66,7 @@ class DataQualityEngine:
             df = self._derive_domain(df)
 
         # Detect duplicates
-        duplicate_flags, duplicate_count = self._detect_duplicates(df)
+        duplicate_flags, duplicate_count = self._detect_duplicates(df, data_type=data_type)
         df["is_duplicate"] = duplicate_flags
         
         # Track duplicate records
@@ -268,32 +268,118 @@ class DataQualityEngine:
             df["domain"] = df["website"].apply(extract_domain)
         return df
 
-    def _detect_duplicates(self, df: pd.DataFrame) -> Tuple[List[bool], int]:
-        seen_keys = set()
+    def _detect_duplicates(self, df: pd.DataFrame, data_type: str = "people") -> Tuple[List[bool], int]:
+        """Detect duplicates with entity-aware rules.
+
+        Rules:
+        - People mode: same email OR same phone -> duplicate; same person + same company (fuzzy) -> duplicate; same company alone allowed.
+        - Company mode: treat company as the entity; same normalized company/domain -> duplicate regardless of person fields.
+        """
+
+        email_seen: set[str] = set()
+        phone_seen: set[str] = set()
+        person_company_seen: List[Tuple[str, str]] = []
         flags: List[bool] = []
         duplicate_count = 0
+
+        # Precompute dynamic column fallbacks
+        company_fallback = next((c for c in df.columns if "company" in c.lower()), None)
+
+        def norm_text(val: Any) -> str:
+            if pd.isna(val):
+                return ""
+            return str(val).lower().strip()
+
+        def norm_phone(val: Any) -> str:
+            if pd.isna(val):
+                return ""
+            return re.sub(r"\D", "", str(val))
+
+        def get_company(row: pd.Series) -> str:
+            for col in ["company_name", "company", "organization", "org_name", company_fallback]:
+                if col and col in row:
+                    val = norm_text(row.get(col, ""))
+                    if val:
+                        return val
+            return ""
+
+        def get_person(row: pd.Series) -> str:
+            # Prefer explicit person_name; fallback to first+last
+            if "person_name" in row:
+                val = norm_text(row.get("person_name", ""))
+                if val:
+                    return val
+            first = norm_text(row.get("first_name", ""))
+            last = norm_text(row.get("last_name", ""))
+            middle = norm_text(row.get("middle_name", ""))
+            full = " ".join([p for p in [first, middle, last] if p]).strip()
+            return full
+
+        def get_email(row: pd.Series) -> str:
+            for col in ["email", "people_email", "work_email", "business_email"]:
+                if col in row:
+                    val = norm_text(row.get(col, ""))
+                    if val:
+                        return val
+            return ""
+
+        def get_phone(row: pd.Series) -> str:
+            for col in ["phone", "people_phone", "work_phone", "mobile"]:
+                if col in row:
+                    val = norm_phone(row.get(col, ""))
+                    if val:
+                        return val
+            return ""
+
         for _, row in df.iterrows():
-            company = str(row.get("company_name", "")).lower().strip()
-            person = str(row.get("person_name", "")).lower().strip()
-            email = str(row.get("email", "")).lower().strip()
-            key = (company, person, email)
+            company = get_company(row)
+            person = get_person(row)
+            email = get_email(row)
+            phone = get_phone(row)
 
             is_dup = False
-            if key in seen_keys:
-                is_dup = True
+
+            if data_type == "company":
+                # In company mode, duplicates are driven by company identity (name/domain) and email/phone if present
+                if email and email in email_seen:
+                    is_dup = True
+                elif phone and phone in phone_seen:
+                    is_dup = True
+                elif company:
+                    for _, seen_company in person_company_seen:
+                        comp_score = fuzz.token_sort_ratio(company, seen_company)
+                        if comp_score >= 90:
+                            is_dup = True
+                            break
             else:
-                for existing in list(seen_keys):
-                    comp_score = fuzz.token_sort_ratio(company, existing[0])
-                    person_score = fuzz.token_sort_ratio(person, existing[1])
-                    if comp_score > 90 and person_score > 90:
-                        is_dup = True
-                        break
+                # People mode: email/phone dominate, then person+company pairing
+                if email and email in email_seen:
+                    is_dup = True
+                elif phone and phone in phone_seen:
+                    is_dup = True
+                elif person and company:
+                    for seen_person, seen_company in person_company_seen:
+                        comp_score = fuzz.token_sort_ratio(company, seen_company)
+                        person_score = fuzz.token_sort_ratio(person, seen_person)
+                        if comp_score >= 90 and person_score >= 90:
+                            is_dup = True
+                            break
+                # Do not mark duplicates on company-only matches; allow multiple people per company.
 
             if is_dup:
                 duplicate_count += 1
             else:
-                seen_keys.add(key)
+                if email:
+                    email_seen.add(email)
+                if phone:
+                    phone_seen.add(phone)
+                if person and company:
+                    person_company_seen.append((person, company))
+                elif data_type == "company" and company:
+                    # Track company even if no person for company-mode duplicate detection
+                    person_company_seen.append(("", company))
             flags.append(is_dup)
+
         return flags, duplicate_count
 
     def _standardize_value(

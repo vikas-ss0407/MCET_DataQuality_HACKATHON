@@ -135,14 +135,15 @@ export default function App() {
             <p className="text-sm font-semibold uppercase tracking-widest text-sky-100 mb-2">
               🛡️ Data Quality Platform
             </p>
-            <h1 className="text-4xl font-bold mb-3">Offline-First QA Guardian</h1>
+            <h1 className="text-4xl font-bold mb-3">QA Guardian</h1>
             <p className="text-lg text-sky-50 max-w-lg">
               Upload CSV or Excel files, run offline validation, and download cleaned data with transparent reports.
             </p>
           </div>
           <div className="bg-sky-500 bg-opacity-20 border border-sky-300 rounded-lg px-6 py-4 text-right">
-            <span className="text-sm font-semibold">✨ AI-Powered</span>
-            <p className="text-xs text-sky-100 mt-1">Enhanced Data Quality</p>
+            <span className="text-sm font-semibold">✨ TEAM NAME:
+            </span>
+            <p className="text-xs text-sky-100 mt-1">VIBE CORDER</p>
           </div>
         </div>
       </header>

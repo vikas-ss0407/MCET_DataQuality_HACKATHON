@@ -4,7 +4,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 import requests
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -59,7 +59,7 @@ def healthcheck():
 
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), data_type: str = Form("people")):
     """Upload and process CSV or Excel file for data quality checks."""
     global last_cleaned_df, last_report, last_missing_records, last_invalid_records, last_duplicate_records
 
@@ -78,9 +78,9 @@ async def upload_file(file: UploadFile = File(...)):
     try:
         # Process based on file type
         if file_ext == "csv":
-            result = engine.process_csv(content)
+            result = engine.process_csv(content, data_type=data_type)
         else:  # Excel
-            result = engine.process_excel(content)
+            result = engine.process_excel(content, data_type=data_type)
     except Exception as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=500, detail=f"Processing error: {str(exc)}") from exc
 
